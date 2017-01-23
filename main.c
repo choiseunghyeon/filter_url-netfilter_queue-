@@ -10,61 +10,21 @@
 #include <regex.h>
 #define tcpdata 40  // about
 int DROPURL=0;
-//0d 0a  to 13 10
-//와이어샤크도 queue를 공유함!!
-// 48 6f 73 74  Host
-void chktcp(unsigned char *buf,int size)// tcp cheack  return value == 1
+regex_t regex;
+/* tcp와 http패킷 사이에 다른 값이 존재함 12byte정도
+와이어샤크도 queue를 공유함!!
+ 48 6f 73 74  Host
+tcp_data = 40; // ip header + tcp header  no eth
+beacuse netfilter dont have eth header
+sudo iptables -A OUTPUT -p tcp -j NFQUEUE
+tcp로 말고 모든 프로토콜로 해준다면 해당 소스에서 tcp만을 잡게 해주어야함 */
+void dumpip(unsigned char *buf,int size)// tcp cheack  return value == 1
 {
     if(buf[0]==0x45 && buf[1]==0x00) // only ip header
     {
         hexdump(&buf[tcpdata],size-tcpdata);
     }
 }
-
-
-int chkurl(unsigned char *buf,int size) // using regex
-{
-    char chkbuf[size]; // protect buffer over flow
-    int first=0,i=0;
-    regex_t regex;
-    int reg; //reg result
-    DROPURL=0;
-    char *badurl="naver.com";
-    regcomp(&regex, badurl, 0); // Compile regular expression
-    for(int k=0;k<size;k++)
-    {
-       chkbuf[first]=buf[i]; // input host url in chkbuf
-       if((int)buf[i]==13 && (int)buf[i+1]==10)
-       {
-         chkbuf[first+2]='\0';
-         break;
-       }
-       i++,first++;
-    }
-    if(!regexec(&regex, chkbuf, 0, NULL, 0))
-    {
-         printf("\nthis is bad url");
-         printf("\n request is denied");
-         DROPURL=1; // Execute regular expression
-         return DROPURL;
-    }
-}
-int chkhost(unsigned char *buf,int size) // input is buf[tcpdata],size-tcpdata
-{
-    for(int i=0;i<size;i++)
-    {
-       if((int)buf[i]==72)
-            if((int)buf[i+1]==111)
-                if((int)buf[i+2]==115)
-                    if((int)buf[i+3]==116)
-                    {
-                        printf("\nfind host ");
-                         return i;
-                    }
-
-     }
-    return 0;
- }
 
 void hexdump(unsigned char *buf,int size)
 {
@@ -78,6 +38,49 @@ void hexdump(unsigned char *buf,int size)
         printf("%02x ",buf[i]);
     }
 }
+
+int chkurl(unsigned char *buf,int size) // using regex
+{
+    char chkbuf[size]; // protect buffer over flow
+    int first=0,i=0;
+    int reg; //reg result
+    DROPURL=0;
+    for(int k=0;k<size;k++)
+    {
+       chkbuf[first]=buf[i]; // input host url in chkbuf
+       if((int)buf[i]==13 && (int)buf[i+1]==10)
+       {
+         chkbuf[first+2]='\0';
+         break;
+       }
+       i++,first++;
+    }
+    if(!regexec(&regex, chkbuf, 0, NULL, 0)) // Execute regular expression
+    {
+         printf("\n**this is bad url");
+         printf("\n**request is denied");
+         DROPURL=1;
+         return DROPURL;
+    }
+}
+int chkhost(unsigned char *buf,int size) // input is buf[tcpdata],size-tcpdata
+{
+    for(int i=0;i<size;i++)
+    {
+       if((int)buf[i]==72)
+            if((int)buf[i+1]==111)
+                if((int)buf[i+2]==115)
+                    if((int)buf[i+3]==116)
+                    {
+                        printf("\nfind host ");
+                        printf("\n%c,%c,%c,%c",buf[i],buf[i+1],buf[i+2],buf[i+3]);
+                        return i;
+                    }
+
+     }
+    return 0;
+ }
+
 
 /* returns packet id */
 static u_int32_t print_pkt (struct nfq_data *tb)
@@ -129,12 +132,12 @@ static u_int32_t print_pkt (struct nfq_data *tb)
     if (ret >= 0)
     {
         printf("payload_len=%d ", ret);
-       // hexdump(data, ret);
-        printf("\n http start: \n");
-        //chktcp(data,ret);
+        hexdump(data, ret);
+        printf("\nhttp start: ");
+        dumpip(data,ret);
         int hostloc;
-        hostloc=chkhost(&data[tcpdata],ret-tcpdata);
-        chkurl(&data[tcpdata+hostloc],ret-(hostloc+tcpdata));
+        hostloc=chkhost(&data[tcpdata],ret-tcpdata); // if detect host then return value is host location
+        chkurl(&data[tcpdata+hostloc],ret-(hostloc+tcpdata)); // if url is bad so DROPURL=1
     }
 
     fputc('\n', stdout);
@@ -162,7 +165,9 @@ int main(int argc, char **argv)
     int fd;
     int rv;
     char buf[4096] __attribute__ ((aligned));
-    //tcp_data = 40; // ip header + tcp header  no eth beacuse netfilter dont have eth header
+    char *badurl="naver.com";
+    regcomp(&regex, badurl, 0); // Compile regular expression
+
     printf("opening library handle\n");
     h = nfq_open();
     if (!h) {
