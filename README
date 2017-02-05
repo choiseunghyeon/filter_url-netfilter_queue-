@@ -5,3 +5,5 @@ then follow these steps
 2. you need to set up lib ex) gcc -o nfqnl_test nfqnl_test.c -lnetfilter_queue
 3. just enter this site https://gitlab.com/gilgil/network/wikis/iptables-and-netfilter/netfilter
 4. sudo iptables -A OUTPUT -j NFQUEUE
+
+* netfilter can get only ip frame
